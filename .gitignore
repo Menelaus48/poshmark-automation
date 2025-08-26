@@ -1,0 +1,123 @@
+# Poshmark Automation - Git Ignore File
+
+# Environment variables (contains sensitive credentials)
+.env
+
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Chrome profile directory (contains session data)
+posh-bot-profile/
+*-bot-profile/
+
+# Logs and screenshots (may contain sensitive information)
+logs/
+*.log
+*.png
+*.jpg
+*.jpeg
+
+# Lock files (daily automation state)
+*.lock
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Testing artifacts
+.pytest_cache/
+.tox/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Credentials and sensitive files
+*.pem
+*.key
+*.crt
+*.p12
+credentials.json
+token.json
+
+# Database files (if using local DB for logging)
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (if any JS tools are added)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
