@@ -144,13 +144,25 @@ The automation takes screenshots at key steps:
 ### Common Issues
 
 **"Login required" errors:**
-- Run `python run.py setup` again to refresh your session
+- The automation uses placeholder-based selectors (`Username or Email`, `Password`)
+- Run `HEADLESS=0 python run.py run` to see the login process
 - Check if 2FA or security challenge is required
+- Verify credentials in `.env` file
 
 **"Balance not found" errors:**
-- Poshmark may have changed their UI
-- Check screenshots in `logs/` folder
-- The script may need selector updates
+- Balance detection uses multiple strategies and fallbacks
+- Check screenshots in `logs/` folder for UI changes
+- The script handles both visible balance and actual transfer amounts
+
+**"Modal dialog" issues:**
+- The automation handles 8+ types of modal dialogs automatically
+- Common modals: "Got it!", "OK", "Close", "Guide for Entering Bank Details"
+- If new modals appear, they'll be logged and the automation will attempt to dismiss
+
+**"Continue button not working":**
+- Usually indicates Bank Direct Deposit account not set up
+- Check screenshot for error messages
+- Ensure your bank account is configured in Poshmark settings
 
 **Cron job not running:**
 - Verify with `crontab -l`
@@ -159,6 +171,7 @@ The automation takes screenshots at key steps:
 
 **Browser crashes or timeouts:**
 - Run with `HEADLESS=0` to see what's happening
+- The automation waits for loading spinners to disappear
 - Check Chrome is updated to latest version
 - Clear the profile: `rm -rf ~/posh-bot-profile` and re-setup
 
