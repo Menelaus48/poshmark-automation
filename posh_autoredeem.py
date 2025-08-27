@@ -196,9 +196,66 @@ def create_daily_lock_file():
     
     return True
 
+def cleanup_old_logs():
+    """Lightweight cleanup - remove files older than thresholds without external dependencies"""
+    try:
+        import glob
+        from pathlib import Path
+        
+        current_time = time.time()
+        cleanup_count = 0
+        
+        # Clean error screenshots older than 30 days
+        error_threshold = current_time - (30 * 24 * 3600)
+        for pattern in ['*error*', '*failed*', '*not_found*', '*timeout*']:
+            for file in glob.glob(f"{LOG_DIR}/screenshot_*{pattern}*.png"):
+                if os.path.getmtime(file) < error_threshold:
+                    os.unlink(file)
+                    cleanup_count += 1
+        
+        # Keep only 10 most recent success screenshots
+        success_files = []
+        for pattern in ['*completed*', '*success*', '*confirmation*']:
+            success_files.extend(glob.glob(f"{LOG_DIR}/screenshot_*{pattern}*.png"))
+        
+        if len(success_files) > 10:
+            # Sort by modification time and remove oldest
+            success_files.sort(key=os.path.getmtime, reverse=True)
+            for file in success_files[10:]:  # Keep first 10, remove rest
+                os.unlink(file)
+                cleanup_count += 1
+        
+        # Clean other screenshots older than 7 days
+        screenshot_threshold = current_time - (7 * 24 * 3600)
+        for file in glob.glob(f"{LOG_DIR}/screenshot_*.png"):
+            if os.path.getmtime(file) < screenshot_threshold:
+                # Skip if it's an error or success screenshot (already handled)
+                filename = os.path.basename(file).lower()
+                if not any(pattern in filename for pattern in 
+                          ['error', 'failed', 'not_found', 'timeout', 'completed', 'success', 'confirmation']):
+                    os.unlink(file)
+                    cleanup_count += 1
+        
+        # Clean lock files older than 7 days
+        lock_threshold = current_time - (7 * 24 * 3600)
+        for file in glob.glob(f"{LOG_DIR}/*.lock"):
+            if os.path.getmtime(file) < lock_threshold:
+                os.unlink(file)
+                cleanup_count += 1
+        
+        if cleanup_count > 0:
+            log(f"Cleaned up {cleanup_count} old log files")
+            
+    except Exception as e:
+        log(f"Warning: Log cleanup failed: {e}")
+        # Don't fail the automation for cleanup issues
+
 def main():
     """Main automation function"""
     log("=== Poshmark Auto-Transfer Starting ===")
+    
+    # Cleanup old logs first (lightweight, non-blocking)
+    cleanup_old_logs()
     
     # Check if we already ran today
     if not create_daily_lock_file():

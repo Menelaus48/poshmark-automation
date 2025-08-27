@@ -17,6 +17,7 @@ Commands:
     run         - Run the automation once
     install     - Install daily cron job
     logs        - Show recent logs
+    cleanup     - Clean up old logs and screenshots
     help        - Show this help
 
 Examples:
@@ -115,6 +116,11 @@ def show_logs():
             for screenshot in screenshots:
                 print(f"   {screenshot}")
 
+def cleanup_logs():
+    """Clean up old logs and screenshots"""
+    print("🧹 Cleaning up old logs and screenshots...")
+    return run_command([sys.executable, "scripts/cleanup_logs.py", "--verbose"], "Running log cleanup")
+
 def show_help():
     """Show help information"""
     print(__doc__)
@@ -137,6 +143,7 @@ def main():
         'run': run_automation,
         'install': install_cron,
         'logs': show_logs,
+        'cleanup': cleanup_logs,
         'help': show_help,
     }
     
