@@ -44,9 +44,11 @@ import os
 import re
 import sys
 import time
+import json
 from datetime import datetime, date
 from pathlib import Path
 from html import unescape
+from urllib.parse import urlparse, parse_qs
 
 # Load environment variables from .env file
 try:
@@ -282,6 +284,30 @@ def extract_transfer_amount(page):
     except Exception as exc:
         log(f"Warning: Failed to extract transfer amount: {exc}")
         return None
+
+
+def save_transfer_summary(amount, confirmation_url, screenshot_path):
+    """Persist a machine-readable summary of the last transfer."""
+    try:
+        parsed = urlparse(confirmation_url or "")
+        request_id = None
+        if parsed.query:
+            request_id = parse_qs(parsed.query).get("redemption_id", [None])[0]
+
+        data = {
+            "timestamp": datetime.now().isoformat(),
+            "amount": amount,
+            "confirmation_url": confirmation_url,
+            "request_id": request_id,
+            "screenshot": screenshot_path,
+        }
+
+        summary_path = Path(LOG_DIR) / "last_transfer.json"
+        summary_path.write_text(json.dumps(data, indent=2))
+        log(f"Transfer summary saved: {summary_path}")
+
+    except Exception as exc:
+        log(f"Warning: Unable to write transfer summary: {exc}")
 
 def wait_for_page_load(page, timeout=30000):
     """Wait for page to fully load"""
@@ -583,6 +609,7 @@ def main():
             
             current_url = page.url
             log(f"Current URL after Continue click: {current_url}")
+            confirmation_url = current_url
             
             # Check if we're on the confirmation page by looking for "Confirm Redeem" text
             page_content = page.content().lower()
@@ -657,6 +684,14 @@ def main():
             else:
                 log(f"✅ Transfer initiated successfully!")
             log(f"Final screenshot: {final_screenshot}")
+
+            save_transfer_summary(transfer_amount_detected, confirmation_url, final_screenshot)
+
+            # Quick console report for the operator
+            log("--- Transfer Summary ---")
+            log(f"Amount: ${transfer_amount_detected:.2f}" if transfer_amount_detected is not None else "Amount: Unknown")
+            log(f"Request URL: {confirmation_url}")
+            log(f"Screenshot: {final_screenshot}")
             
             # Check for success indicators
             page_text = page.content().lower()
