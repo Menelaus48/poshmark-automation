@@ -68,6 +68,19 @@ class ParseMoneyTests(unittest.TestCase):
         html = "<p>$0.35 fee</p><p>$0.75 tip</p><p>$35.10 payout</p>"
         self.assertEqual(parse_money(html), 35.10)
 
+    def test_ignores_instant_transfer_fee(self):
+        html = (
+            "<div>Instant Transfer</div>"
+            "<div>$2 fee</div>"
+            "<div>Available Balance</div>"
+            "<div>$94.50</div>"
+        )
+        self.assertEqual(parse_money(html), 94.50)
+
+    def test_returns_none_if_only_instant_transfer_fee_present(self):
+        html = "<div>Instant Transfer - $2 fee</div>"
+        self.assertIsNone(parse_money(html))
+
     def test_returns_none_when_no_amount_present(self):
         html = "<div>No dollars here</div>"
         self.assertIsNone(parse_money(html))

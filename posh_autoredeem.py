@@ -131,16 +131,30 @@ def parse_money(text):
         return balance_amount
 
     # Fall back to collecting all dollar amounts and returning the most likely candidate
-    all_amounts = re.findall(r'\$\s*([0-9,]+(?:\.[0-9]{2})?)', normalized_text)
-    if not all_amounts:
+    amount_pattern = re.compile(r'\$\s*([0-9,]+(?:\.[0-9]{2})?)')
+    matches = list(amount_pattern.finditer(normalized_text))
+    if not matches:
         return None
 
     candidates = []
-    for amount_str in all_amounts:
+    fallback_candidates = []
+
+    for match in matches:
+        amount_str = match.group(1)
         try:
             amount = float(amount_str.replace(",", ""))
         except ValueError:
             continue
+
+        context_start = max(0, match.start() - 80)
+        context_end = min(len(normalized_text), match.end() + 80)
+        context = normalized_text[context_start:context_end].lower()
+
+        is_instant_transfer_fee = "instant transfer" in context and "fee" in context
+        if is_instant_transfer_fee:
+            continue
+
+        fallback_candidates.append(amount)
 
         # Skip very small amounts that are often fees (e.g., $0.35)
         if amount >= 5.0:
@@ -149,11 +163,11 @@ def parse_money(text):
     if candidates:
         return max(candidates)
 
-    # If everything was < $5, return the largest anyway as a last resort
-    try:
-        return max(float(a.replace(",", "")) for a in all_amounts)
-    except ValueError:
-        return None
+    # If everything was < $5 but still legitimate (or the user really has <$5), return the largest
+    if fallback_candidates:
+        return max(fallback_candidates)
+
+    return None
 
 def take_screenshot(page, name_suffix=""):
     """Take screenshot for debugging/logging"""
