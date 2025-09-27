@@ -46,6 +46,7 @@ import sys
 import time
 from datetime import datetime, date
 from pathlib import Path
+from html import unescape
 
 # Load environment variables from .env file
 try:
@@ -72,20 +73,85 @@ def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}", flush=True)
 
+def _prepare_text_for_money_parse(raw_text):
+    """Normalize HTML/text content so currency parsing is reliable."""
+    if not raw_text:
+        return ""
+
+    text = raw_text
+
+    # If we see tags, strip script/style and remove markup to avoid spurious matches
+    if "<" in text and ">" in text:
+        text = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+        text = re.sub(r"<script.*?>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style.*?>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+
+    text = unescape(text)
+    text = text.replace("\xa0", " ")
+    # Collapse whitespace so "$ 94.50" and "$\n94.50" normalize consistently
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _match_amount_from_patterns(text):
+    """Try targeted balance patterns before falling back to generic matches."""
+    balance_patterns = [
+        r'Available[^$]*\$\s*([0-9,]+(?:\.[0-9]{2})?)',
+        r'Balance[^$]*\$\s*([0-9,]+(?:\.[0-9]{2})?)',
+        r'redeemable[^$]*\$\s*([0-9,]+(?:\.[0-9]{2})?)',
+        r'\$\s*([0-9,]+(?:\.[0-9]{2})?)\s*Available',
+        r'\$\s*([0-9,]+(?:\.[0-9]{2})?)\s*Balance',
+        r'\$\s*([0-9,]+(?:\.[0-9]{2})?)\s*redeemable',
+    ]
+
+    for pattern in balance_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            amount_str = match.group(1).replace(",", "")
+            try:
+                return float(amount_str)
+            except ValueError:
+                continue
+
+    return None
+
+
 def parse_money(text):
-    """Extract dollar amount from text string"""
+    """Extract dollar amount from text string, prioritizing balance-related amounts."""
     if not text:
         return None
-    # Look for pattern like $12.34, $1,234.56, etc.
-    match = re.search(r'\$([0-9,]+(?:\.[0-9]{2})?)', text)
-    if match:
-        # Remove commas and convert to float
-        amount_str = match.group(1).replace(",", "")
+
+    normalized_text = _prepare_text_for_money_parse(text)
+
+    balance_amount = _match_amount_from_patterns(normalized_text)
+    if balance_amount is not None:
+        return balance_amount
+
+    # Fall back to collecting all dollar amounts and returning the most likely candidate
+    all_amounts = re.findall(r'\$\s*([0-9,]+(?:\.[0-9]{2})?)', normalized_text)
+    if not all_amounts:
+        return None
+
+    candidates = []
+    for amount_str in all_amounts:
         try:
-            return float(amount_str)
+            amount = float(amount_str.replace(",", ""))
         except ValueError:
-            return None
-    return None
+            continue
+
+        # Skip very small amounts that are often fees (e.g., $0.35)
+        if amount >= 5.0:
+            candidates.append(amount)
+
+    if candidates:
+        return max(candidates)
+
+    # If everything was < $5, return the largest anyway as a last resort
+    try:
+        return max(float(a.replace(",", "")) for a in all_amounts)
+    except ValueError:
+        return None
 
 def take_screenshot(page, name_suffix=""):
     """Take screenshot for debugging/logging"""
@@ -169,8 +235,53 @@ def dismiss_modal_dialogs(page):
         log(f"Dismissed {modals_dismissed} modal dialog(s)")
     else:
         log("No modal dialogs found")
-    
+
     return modals_dismissed
+
+
+def extract_transfer_amount(page):
+    """Return the transfer amount visible on the current page, if possible."""
+    try:
+        strategies = [
+            # Look for an element labelled "Amount" and grab the nearest currency string
+            lambda: page.locator("xpath=(//*[normalize-space(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'))='AMOUNT'])[1]/following::*[contains(normalize-space(), '$')][1]"),
+            # Fallback: any element containing both "Amount" and a dollar figure
+            lambda: page.locator("xpath=//*[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'AMOUNT') and contains(text(), '$')]")
+        ]
+
+        # Include the confirmation summary section if present
+        try:
+            confirmation_section = page.locator("section").filter(has_text=re.compile("Confirm Redeem", re.IGNORECASE))
+            strategies.append(lambda: confirmation_section.locator("xpath=.//*[contains(text(), '$')]"))
+        except Exception:
+            pass
+
+        for selector_factory in strategies:
+            try:
+                locator = selector_factory()
+            except Exception:
+                continue
+
+            try:
+                if locator.count() == 0:
+                    continue
+                text = locator.first.inner_text().strip()
+                amount = parse_money(text)
+                if amount is not None:
+                    return amount
+            except Exception:
+                continue
+
+        # As a last resort, parse the full page text
+        try:
+            page_text = page.inner_text("body")
+        except Exception:
+            page_text = page.content()
+        return parse_money(page_text)
+
+    except Exception as exc:
+        log(f"Warning: Failed to extract transfer amount: {exc}")
+        return None
 
 def wait_for_page_load(page, timeout=30000):
     """Wait for page to fully load"""
@@ -344,19 +455,37 @@ def main():
             
             # Check if there's a redeemable balance - look for dollar amounts on the page
             log("Checking for redeemable balance...")
-            page_text = page.content()
+            transfer_amount_detected = None
+
+            try:
+                page_text = page.inner_text("body")
+            except Exception:
+                page_text = page.content()
+
             balance = parse_money(page_text)
-            
-            if balance is None:
-                log("No redeemable balance found or could not parse balance")
-                # Still proceed in case balance detection fails but there is actually balance
-                balance = 0.01  # Minimal amount to trigger the flow
-            else:
+
+            if balance is not None:
+                transfer_amount_detected = balance
                 log(f"Found balance: ${balance:.2f}")
-            
-            if balance < MIN_TRANSFER:
-                log(f"Balance ${balance:.2f} is below threshold ${MIN_TRANSFER:.2f}. No transfer needed.")
-                return
+                if balance < MIN_TRANSFER:
+                    log(f"Balance ${balance:.2f} is below threshold ${MIN_TRANSFER:.2f}. No transfer needed.")
+                    return
+            else:
+                log("Could not determine redeemable balance on payout page; will verify on confirmation page.")
+
+                # Try to read default amount from visible input (if present)
+                try:
+                    amount_inputs = page.locator("input[name='amount']")
+                    if amount_inputs.count() > 0:
+                        input_value = amount_inputs.first.input_value().strip()
+                        if input_value:
+                            parsed_amount = parse_money(f"${input_value}")
+                            if parsed_amount is not None:
+                                transfer_amount_detected = parsed_amount
+                                log(f"Amount input has value: ${parsed_amount:.2f}")
+                except Exception:
+                    # Non-fatal if we cannot access the input
+                    pass
             
             # Proceed with transfer - Select "Bank Direct Deposit" radio button
             log("Looking for Bank Direct Deposit option...")
@@ -473,6 +602,18 @@ def main():
             
             # Take screenshot of confirmation page
             take_screenshot(page, "confirmation_page")
+
+            # Attempt to read the confirmed transfer amount from the page
+            confirmed_amount = extract_transfer_amount(page)
+            if confirmed_amount is not None:
+                transfer_amount_detected = confirmed_amount
+                log(f"Confirmation page amount: ${confirmed_amount:.2f}")
+                if confirmed_amount < MIN_TRANSFER:
+                    log(f"Amount ${confirmed_amount:.2f} is below threshold ${MIN_TRANSFER:.2f}. Aborting transfer.")
+                    take_screenshot(page, "transfer_below_threshold")
+                    return
+            else:
+                log("Warning: Could not read transfer amount on confirmation page.")
             
             # Look for and click the final Redeem button
             log("Looking for final Redeem button...")
@@ -511,7 +652,10 @@ def main():
             # Take final screenshot
             final_screenshot = take_screenshot(page, "transfer_completed")
             
-            log(f"✅ Transfer initiated successfully!")
+            if transfer_amount_detected is not None:
+                log(f"✅ Transfer initiated successfully for ${transfer_amount_detected:.2f}!")
+            else:
+                log(f"✅ Transfer initiated successfully!")
             log(f"Final screenshot: {final_screenshot}")
             
             # Check for success indicators
